@@ -9,9 +9,9 @@ TypeEnum = {'TypeAnd': 'and', 'TypeOr': 'or', 'TypeTrueN': 'true', 'TypeNode': '
 
 
 class DestCode(object):
-    def __init__(self):
+    def __init__(self, isOfficial):
         self.code_list = []
-        self.isOfficial = 0
+        self.isOfficial = isOfficial
         self.index = 0
 
     def append(self, code, comment=""):
@@ -28,7 +28,20 @@ class DestCode(object):
         self.index += 1
         return self.index
 
-GlobalDestCode = DestCode()
+class CodeGenExtendPoint(object):
+    @staticmethod
+    def genForNode(destnode, node_name):
+        # you can modify anything here
+        destnode.append("r0%s" % node_name)
+        # destnode.append("calc_and_push_for_node%s" % node_name)
+        """
+        if('!!' in self.value): 
+            ch = self.value.split('!!')[-1]
+            GlobalDestCode.append("r0%s is(0) " %ch)
+        else:
+            GlobalDestCode.append("r0%s" %self.value)
+        """
+
 
 path_onechar = []
 path_multichars = {}
@@ -108,7 +121,7 @@ class Tree(object):
     def searchpath(self, tab, nodechar):
         global path_onechar         
         if tab == 1:
-            print("\n===========show Tree Begin========")
+            print("\n===========show searchpath Begin========")
             print("Tree: %s" % self.expr())
         tabstr = "    "*tab
         if self.type == "and" or self.type == "or":           
@@ -131,7 +144,7 @@ class Tree(object):
                 tab = 1
                 return 
         if tab == 1:
-            print("\n===========show Tree End  ========")        
+            print("\n===========show searchpath End  ========")
 
     def expr(self):
         if self.type == "and":
@@ -157,107 +170,133 @@ class Tree(object):
             temp.next = p
         else:
             self.leftChild = p
-        return self    
-    
-    def Traverse(self, myFatherHaveToldMeTheLabelId):   # myFatherHaveToldMeTheLabelId. If not 0, means it is the id of the level
-        global GlobalDestCode
+        return self
+
+    # myFatherHaveToldMeTheLabelId： If not 0, means that the parent function has created a labelId.
+    def Traverse(self, destCode, myFatherHaveToldMeTheLabelId):
         if self.type == TypeEnum['TypeAnd'] or self.type == TypeEnum['TypeOr']:
-            print(self.type)
-
-            if myFatherHaveToldMeTheLabelId > 0:      # If label_id is assigned by my parents, then follow it.
-                tmp_index = myFatherHaveToldMeTheLabelId
-            else:
-                tmp_index = GlobalDestCode.applyIndex()         # otherwise build a label_id
-
-            if self.leftChild.type == self.type:    # if my  left child tree is and same with me, then set my index id to left child tree
-                self.leftChild.Traverse(tmp_index)
-            else:
-                self.leftChild.Traverse(0)
-                
-            if self.type == TypeEnum['TypeAnd']:
-                GlobalDestCode.append(" jne(1) LABEL%d  " % tmp_index,
-                                      "; if %s not true, need not to do %s, so goto LABEL%d"
-                                      % (self.leftChild.expr(), self.rightChild.expr(), tmp_index))
-            else:  # self.type == TypeEnum['TypeOr']:
-                GlobalDestCode.append(" je(1) LABEL%d   " % tmp_index,
-                                      "; if %s is true, need not to do %s, so goto LABEL%d"
-                                      % (self.leftChild.expr(), self.rightChild.expr(), tmp_index))
-
-            if self.rightChild.type == self.type:  # if my  right child tree is "and" same with me, then set my index id to right child tree
-                self.rightChild.Traverse(tmp_index)
-            elif self.rightChild.type == TypeEnum["TypeTrueN"]:
-                self.rightChild.Traverse(tmp_index)
-            else:
-                self.rightChild.Traverse(0)
-
-            if not myFatherHaveToldMeTheLabelId:    # If no parent set label_id, use my own
-                GlobalDestCode.append("\r\n:LABEL%d     " % tmp_index,
-                                      "; finish calc: %s" % self.expr())
-
+            self.genCodeForAndOr(destCode, myFatherHaveToldMeTheLabelId)
         elif self.type == TypeEnum['TypeTrueN']:
-            tmp_index = GlobalDestCode.applyIndex()
-            
-            if myFatherHaveToldMeTheLabelId:
-                tmp_index2 = myFatherHaveToldMeTheLabelId
-            else:
-                tmp_index2 = GlobalDestCode.applyIndex()
-
-            tmp = 0
-            temp = self.leftChild 
-            pre_value = temp.value
-            pre_temp = temp
-            i = 0
-            while temp:
-                pre_value1 = pre_temp.value
-                pre_temp = temp
-                print("i:%d,pre_value1:%s" % (i, pre_value1))
-                temp.Traverse(0)
-                if temp.next is None:
-                    GlobalDestCode.append(" r0%s +  w0%s je(%s) LABEL%s" % (pre_value1, temp.value, self.value, tmp_index))
-                    break
-                pre_value2 = temp.value
-                temp = temp.next
-                tmp += 1
-                print("i:%d,pre_value2:%s" % (i, pre_value2))
-                if temp == self.leftChild.next:
-                    print("no need to check first return value")
-                elif temp is not None:                   
-                    GlobalDestCode.append(" r0%s +  w0%s je(%s) LABEL%s" % (pre_value1, pre_value2, self.value, tmp_index))
-                i += 1
-            
-            GlobalDestCode.append(" push(0)     ",
-                                  ";result is false: %s" % self.expr())
-            GlobalDestCode.append(" goto LABEL%d" % tmp_index2)
-            GlobalDestCode.append("\r\n:LABEL%d     " % tmp_index,
-                                  ";result is true: %s" % self.expr())
-            GlobalDestCode.append(" push(1)")
-
-            if not myFatherHaveToldMeTheLabelId:
-                GlobalDestCode.append("\r\n:LABEL%d    " % tmp_index2,
-                                      "; finish calc: %s" % self.expr())
+            self.genCodeForTrueN(destCode, myFatherHaveToldMeTheLabelId)
         elif self.type == TypeEnum['TypeNode']:
-            GlobalDestCode.append("r0%s" % self.value)
-            """
-            if('!!' in self.value): 
-                ch = self.value.split('!!')[-1]
-                GlobalDestCode.append("r0%s is(0) " %ch)
-            else:
-                GlobalDestCode.append("r0%s" %self.value)
-            """
+            self.genCodeForNode(destCode)
         else:
             print('something error')
-            
-    def Go(self):
-        self.Traverse(0)
-        GlobalDestCode.append(" jne(1) END")
-        """
-        Traverse_List.append(";;; :FOUND") 
-        Traverse_List.append("       FeedbackFile ")
-        Traverse_List.append("       vs(1)")
-        Traverse_List.append("       ;vy ")
-        Traverse_List.append(" :END ") 
-        Traverse_List.append("       vn")
-        """        
+
+    def genCodeForNode(self, destCode):
+        CodeGenExtendPoint.genForNode(destCode, self.value)
+
+    def genCodeForAndOr(self, destCode, myFatherHaveToldMeTheLabelId):
+        if myFatherHaveToldMeTheLabelId > 0:  # If label_id is assigned by my parents, then follow it.
+            tmp_index = myFatherHaveToldMeTheLabelId
+        else:
+            tmp_index = destCode.applyIndex()  # otherwise build a label_id
+
+        # if my left child tree is and same with me, then set my index id to left child tree
+        if self.leftChild.type == self.type:
+            self.leftChild.Traverse(destCode, tmp_index)
+        else:
+            self.leftChild.Traverse(destCode, 0)
+        if self.type == TypeEnum['TypeAnd']:
+            destCode.append(" jne(1) LABEL%d  " % tmp_index,
+                                  "; if %s not true, need not to do %s, so goto LABEL%d"
+                                  % (self.leftChild.expr(), self.rightChild.expr(), tmp_index))
+        else:  # self.type == TypeEnum['TypeOr']:
+            destCode.append(" je(1) LABEL%d   " % tmp_index,
+                                  "; if %s is true, need not to do %s, so goto LABEL%d"
+                                  % (self.leftChild.expr(), self.rightChild.expr(), tmp_index))
+
+        #destCode.append("pop\n")
+
+        if self.rightChild.type == self.type:  # if my  right child tree is "and" same with me, then set my index id to right child tree
+            self.rightChild.Traverse(destCode, tmp_index)
+        elif self.rightChild.type == TypeEnum["TypeTrueN"]:
+            self.rightChild.Traverse(destCode, tmp_index)
+        else:
+            self.rightChild.Traverse(destCode, 0)
+        if not myFatherHaveToldMeTheLabelId:  # If no parent set label_id, use my own
+            destCode.append("\r\n:LABEL%d     " % tmp_index,
+                                  "; finish calc: %s" % self.expr())
+
+    def genCodeForTrueN(self, destCode, myFatherHaveToldMeTheLabelId):
+        tmp_index = destCode.applyIndex()
+        if myFatherHaveToldMeTheLabelId:
+            tmp_index2 = myFatherHaveToldMeTheLabelId
+        else:
+            tmp_index2 = destCode.applyIndex()
+        tmp = 0
+        temp = self.leftChild
+        pre_value = temp.value
+        pre_temp = temp
+        i = 0
+        while temp:
+            pre_value1 = pre_temp.value
+            pre_temp = temp
+            print("i:%d,pre_value1:%s" % (i, pre_value1))
+            temp.Traverse(destCode, 0)
+            if temp.next is None:
+                destCode.append(" r0%s +  w0%s je(%s) LABEL%s" % (pre_value1, temp.value, self.value, tmp_index))
+                break
+            pre_value2 = temp.value
+            temp = temp.next
+            tmp += 1
+            print("i:%d,pre_value2:%s" % (i, pre_value2))
+            if temp == self.leftChild.next:
+                print("no need to check first return value")
+            elif temp is not None:
+                destCode.append(" r0%s +  w0%s je(%s) LABEL%s" % (pre_value1, pre_value2, self.value, tmp_index))
+            i += 1
+        destCode.append(" push(0)     ",
+                              ";result is false: %s" % self.expr())
+        destCode.append(" goto LABEL%d" % tmp_index2)
+        destCode.append("\r\n:LABEL%d     " % tmp_index,
+                              ";result is true: %s" % self.expr())
+        destCode.append(" push(1)")
+        if not myFatherHaveToldMeTheLabelId:
+            destCode.append("\r\n:LABEL%d    " % tmp_index2,
+                                  "; finish calc: %s" % self.expr())
+
+    def genCodeForTrueN2(self, destCode, myFatherHaveToldMeTheLabelId):
+        tmp_index = destCode.applyIndex()
+        tmp_index2 = destCode.applyIndex()
+        if myFatherHaveToldMeTheLabelId:
+            tmp_index2 = myFatherHaveToldMeTheLabelId
+        else:
+            tmp_index2 = destCode.applyIndex()
+
+        temp = self.leftChild
+        num = 0
+        while temp:
+            num += 1
+            temp.Traverse(destCode, 0)
+            if num > 1:
+                destCode.append(" + je(%d) MY_LABEL_%d \n" % (self.value, tmp_index))
+            temp = temp.next
+
+        destCode.append("pop push(0) goto MY_LABEL_%d" % tmp_index2)
+        destCode.append("")
+        destCode.append(":MY_LABEL_%d    " % tmp_index)
+                        #"; finish calc: %s" % self.expr())
+        destCode.append("pop push(1)\n")
+
+        #destCode.append(":MY_LABEL_%d    " % tmp_index2,
+        #                "; finish calc: %s" % self.expr())
+
+        if not myFatherHaveToldMeTheLabelId:
+            destCode.append(":LABEL%d    " % tmp_index2,
+                            "; finish calc: %s" % self.expr())
+
+    def Go(self, destCode):
+        self.Traverse(destCode, 0)
+        destCode.append(" jne(1) END")
+
+        '''destCode.append("\r\n:FOUND")
+        destCode.append("       FeedbackFile ")
+        destCode.append("       vs(1)")
+        destCode.append("       ;vy ")
+        destCode.append(" :END ")
+        destCode.append("       vn")'''
+
 
 
 class ParseLogic(object):
@@ -393,9 +432,8 @@ class ParseLogic(object):
 
     def get_ptnlogic(self, input_str, is_official=0):
         # is_official: 0-has comments, 1-no comments in pattern source
-        global GlobalDestCode
-        GlobalDestCode.clear(is_official)
-        self.parse_input(input_str)    
+
+        self.parse_input(input_str)
         
         node_list = []
         for each in self.input_list:
@@ -411,8 +449,9 @@ class ParseLogic(object):
             tree2.show(1)            
             self.char_path = tree2.getcharpath(node_list)
             # print(self.char_path)
-            tree2.Go()
-            for key in GlobalDestCode.code_list:
+            destCode = DestCode(is_official)
+            tree2.Go(destCode)
+            for key in destCode.code_list:
                 self.logic_list.append(key)
             self.return_result['result'] = True
             self.return_result['ptnlogic'] = self.logic_list
