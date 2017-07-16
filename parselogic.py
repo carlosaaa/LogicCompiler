@@ -33,6 +33,9 @@ class DestCode(object):
 
 GlobalDestCode = DestCode()
 
+path_onechar = []
+path_multichars = {}
+
 def writelist2file(list1, filename):
     if list1:
         handle = open(filename, 'a+')  
@@ -67,8 +70,8 @@ class Tree(object):
         
         self.leftChild = left
         self.rightChild = right
-        self.next = next   
-        
+        self.next = next        
+                
     def show(self, tab=1):
         if tab == 1:
             print("\n===========show Tree Begin========")
@@ -88,6 +91,45 @@ class Tree(object):
             print("%s'%s'" % (tabstr, self.value))
         if tab == 1:
             print("\n===========show Tree End  ========")
+   
+    def getcharpath(self, nodelist):   
+        global path_onechar 
+        global path_multichars 
+        for each in nodelist:
+            path_onechar = []
+            self.searchpath(1,each)
+            print(path_onechar)            
+            path_multichars[each] = [] 
+            path_multichars[each].extend(path_onechar)
+        return path_multichars
+        
+    def searchpath(self, tab, nodechar):
+        global path_onechar         
+        if tab == 1:
+            print("\n===========show Tree Begin========")
+            print("Tree: %s" % self.expr())
+        tabstr = "    "*tab
+        if self.type == "and" or self.type == "or":           
+            print("%s%s" % (tabstr, self.type))
+            path_onechar.append(self.type)
+            self.leftChild.searchpath(tab+1, nodechar)
+            self.rightChild.searchpath(tab+1, nodechar)
+        if self.type == "true" :            
+            temp = self.leftChild
+            while temp:
+                if(temp.value == nodechar):
+                    print("%sTrue(%s)" % (tabstr, self.value))
+                    path_onechar.append("True(%s)" % (self.value))
+                temp.searchpath(tab+1, nodechar)
+                temp = temp.next
+        elif self.type == "node":
+            if(self.value == nodechar):
+                print("%s'%s'" % (tabstr, self.value))
+                path_onechar.append(self.value)
+                tab = 1
+                return 
+        if tab == 1:
+            print("\n===========show Tree End  ========")        
 
     def expr(self):
         if self.type == "and":
@@ -131,7 +173,7 @@ class Tree(object):
                 self.leftChild.Traverse(tmp_index)
             else:
                 self.leftChild.Traverse(0)
-
+                
             if self.type == TypeEnum['TypeAnd']:
                 GlobalDestCode.append(" jne(1) LABEL%d  "%tmp_index,
                                       "; if %s not true, need not to do %s, so goto LABEL%d" \
@@ -154,7 +196,7 @@ class Tree(object):
 
         elif (self.type == TypeEnum['TypeTrueN']):
             tmp_index = GlobalDestCode.applyIndex()
-
+            
             if myFatherHaveToldMeTheLabelId:
                 tmp_index2 = myFatherHaveToldMeTheLabelId
             else:
@@ -195,11 +237,14 @@ class Tree(object):
                 GlobalDestCode.append("\r\n:LABEL%d    " % tmp_index2,
                                       "; finish calc: %s" % self.expr())
         elif(self.type == TypeEnum['TypeNode']):
+            GlobalDestCode.append("r0%s" %self.value)
+            """
             if('!!' in self.value): 
                 ch = self.value.split('!!')[-1]
-                GlobalDestCode.append("r0%s ~" %ch)
+                GlobalDestCode.append("r0%s is(0) " %ch)
             else:
                 GlobalDestCode.append("r0%s" %self.value)
+            """
         else:
             print('something error')
             
@@ -207,7 +252,7 @@ class Tree(object):
         self.Traverse(0)
         GlobalDestCode.append(" jne(1) END")
         """
-        Traverse_List.append(" :FOUND") 
+        Traverse_List.append(";;; :FOUND") 
         Traverse_List.append("       FeedbackFile ")
         Traverse_List.append("       vs(1)")
         Traverse_List.append("       ;vy ")
@@ -221,6 +266,7 @@ class ParseLogic(object):
         self.return_result = {'result':False, 'msg':''}
         self.local_logicfile = 'ptnsrc.txt'
         self.input_list = []
+        self.char_path = {}
         if(os.path.exists(self.local_logicfile)):
             os.remove(self.local_logicfile)
     
@@ -348,20 +394,28 @@ class ParseLogic(object):
         #is_official: 0-has comments, 1-no comments in pattern source
         global GlobalDestCode
         GlobalDestCode.clear(is_official)
-
-        self.parse_input(input_str)
-        print(self.input_list)
+        self.parse_input(input_str)    
+        
+        node_list = []
+        for each in self.input_list:
+            each = each.strip(' ')
+            if each not in ['(', ')','&', '|', '!!', 'True']:
+                if(not each.isdigit() and len(each)):
+                    node_list.append(each)      
         if 1: #try:
             #global INDEX
             #INDEX = 0
             tree2 = Tree()
             tree2 = self.parse2(self.input_list, True)            
-            tree2.show(1)           
+            tree2.show(1)            
+            self.char_path = tree2.getcharpath(node_list)
+            #print(self.char_path)           
             tree2.Go()
             for key in GlobalDestCode.code_list:
                self.logic_list.append(key)
             self.return_result['result']= True
             self.return_result['ptnlogic']= self.logic_list
+            self.return_result['charpath']= self.char_path 
             return self.return_result
         '''except Exception, e:
             print("exception %s" %str(e))
@@ -380,24 +434,30 @@ if __name__ == "__main__":
     """  
     #detection_logic1 = "A&B&C&True(2,E,F,G)"  
     TestCase = []
+    TestCase.append( "A & B & True(2, C, D, E) & !!F")
+    TestCase.append("A&B&C&D&E")   
+    TestCase.append("A&B&C&!!D")
+    TestCase.append("True(3,A,B,C,D)")
+    TestCase.append("A&B&C&True(2,D,E,F) & (G|H|I) &(K|L)")
+    TestCase.append("True(2,A,B,True(3, C,D,E,F), True(2,G,H,I))")    
+    """    
     TestCase.append("A&B&C&D&E")
-    TestCase.append("A&B&C&!!H")
-    TestCase.append("True(2,A,B,C,D)&E&F&G")
-    TestCase.append("True(2,A,B,C,D)|E|F|G")
-
-
-    TestCase.append("A|True(2,D,E,F)")
-    TestCase.append("A&True(2,D,E,F)")
-
-
-    TestCase.append("True(2,A,B,C, True(2,D,E,F))")
-
+    TestCase.append("A&B&C&!!H")   
     TestCase.append("A&B&C&True(2,E,F,G) & (H|I|J) &(K|L)")
     TestCase.append("A&B&C&True(2,E,F,G)")
     TestCase.append("A&B&C&True(2,E,F,G) &H")
     TestCase.append("True(2,E,F,G)")
     TestCase.append("True(3,E,F,G,H)")
-    TestCase.append("True(2,E,F,True(3, A,B,C,D), True(2,G,H,I))")
+    TestCase.append("True(2,E,F,True(3, A,B,C,D), True(2,G,H,I))")  
+
+    TestCase.append("True(2,A,B,C,D)&E&F&G")
+    TestCase.append("True(2,A,B,C,D)|E|F|G")
+    
+    TestCase.append("A|True(2,D,E,F)")
+    TestCase.append("A&True(2,D,E,F)")  
+    TestCase.append("True(2,A,B,C, True(2,D,E,F))")
+    """
+
     for i in range(0, len(TestCase)):
         filename = 'ptnsrc'+str(i)+'.txt' 
         if os.path.exists(filename):        
@@ -410,9 +470,12 @@ if __name__ == "__main__":
         ret = ph.get_ptnlogic(tmp_input,0)
         if(ret['result']):        
             ResultList = ret['ptnlogic']
+            dictList = ret['charpath']
             filename = 'ptnsrc'+str(i)+'.txt'            
             writestr2file(";%s\r\n" %tmp_input,filename)
             writelist2file(ResultList, filename)
+            writestr2file(str(dictList),filename)
+            
         #raw_input("Complete to handle %s" %tmp_input)
             
     
